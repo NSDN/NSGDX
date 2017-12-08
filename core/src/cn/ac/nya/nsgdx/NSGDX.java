@@ -1,7 +1,7 @@
 package cn.ac.nya.nsgdx;
 
 import cn.ac.nya.nsgdx.entity.Bullet;
-import cn.ac.nya.nsgdx.entity.Exectuer;
+import cn.ac.nya.nsgdx.entity.Exectuor;
 import cn.ac.nya.nsgdx.entity.Player;
 import cn.ac.nya.nsgdx.utility.IObject;
 import cn.ac.nya.nsgdx.utility.Utility;
@@ -9,6 +9,7 @@ import cn.ac.nya.nsgdx.entity.Animator;
 import cn.ac.nya.nsgdx.utility.Renderer;
 import cn.ac.nya.nsgdx.entity.Animator.Interpolation;
 
+import com.badlogic.gdx.Application;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.audio.Music;
@@ -35,6 +36,7 @@ public class NSGDX extends ApplicationAdapter {
 	private int counter = 0;
 
 	private LinkedList<IObject> objectPool = new LinkedList<>();
+    private LinkedList<IObject> cachePool = new LinkedList<>();
 	private ScheduledThreadPoolExecutor threadPoolExecutor = new ScheduledThreadPoolExecutor(1);
 
 	private Bullet theBullet;
@@ -54,11 +56,12 @@ public class NSGDX extends ApplicationAdapter {
 		initEntity();
 
 		threadPoolExecutor.scheduleWithFixedDelay(() -> {
-		    objectPool.forEach((i) -> {
-		        if (i.onUpdate(counter) == IObject.Result.END) {
-		            objectPool.remove(i);
+		    cachePool.clear(); cachePool.addAll(objectPool);
+            for (IObject i : cachePool) {
+                if (i.onUpdate(counter) == IObject.Result.END) {
+                    objectPool.remove(i);
                 }
-            });
+            }
             counter += 1;
 		}, 1000, 10, TimeUnit.MILLISECONDS);
 
@@ -70,7 +73,9 @@ public class NSGDX extends ApplicationAdapter {
 		Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
 
 		renderer.begin();
-        objectPool.forEach((i) -> i.onRender(renderer));
+        for (IObject i : objectPool) {
+            i.onRender(renderer);
+        }
 		renderer.end();
 
 		renderer.begin();
@@ -78,6 +83,11 @@ public class NSGDX extends ApplicationAdapter {
 		renderer.end();
 
 	}
+
+    @Override
+    public void dispose() {
+        threadPoolExecutor.shutdown();
+    }
 
 	private void Tld(String name) {
 	    textureManager.put(name,
@@ -90,7 +100,7 @@ public class NSGDX extends ApplicationAdapter {
     }
 
 	private void loadAssets() {
-        Tld("nsdn_base"); Tld("nsdn_nya");
+        Tld("nsdn_base"); Tld("nsdn_nya"); Tld("nyasama");
         for (int i = 1; i <= 5; i++) Tld("screen_" + i);
         testMusic = Gdx.audio.newMusic(Gdx.files.internal("sounds/bgm.ogg"));
         testSound = Gdx.audio.newSound(Gdx.files.internal("sounds/biu.ogg"));
@@ -110,6 +120,27 @@ public class NSGDX extends ApplicationAdapter {
         };
 
         thePlayer = new Player(null) {
+            private void doControl(Player player) {
+                Vector2 vel = Utility.vec2(0, 0);
+
+                if (Gdx.input.isKeyPressed(Input.Keys.UP)) vel.y = 1;
+                if (Gdx.input.isKeyPressed(Input.Keys.DOWN)) vel.y = -1;
+                if (Gdx.input.isKeyPressed(Input.Keys.LEFT)) vel.x = -1;
+                if (Gdx.input.isKeyPressed(Input.Keys.RIGHT)) vel.x = 1;
+
+                if (Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT))
+                    vel.scl(2.0F);
+                else
+                    vel.scl(5.0F);
+
+                if (Gdx.input.isTouched()) {
+                    vel.x = Gdx.input.getDeltaX();
+                    vel.y = -Gdx.input.getDeltaY();
+                }
+
+                player.move(vel);
+            }
+
             @Override
             public Result onUpdate(int t) {
                 doControl(this);
@@ -131,41 +162,62 @@ public class NSGDX extends ApplicationAdapter {
                 .next(Tget("nsdn_base"), Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight), 180.0F, 2.0F, 0.0F)
                 .next(Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F, 1.0F)
                 .next(Interpolation.LINEAR, 100, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F)
-                .next(Interpolation.QUADRATIC, 150, Utility.vec2h(devWidth, devHeight), -90.0F, 0.05F, 0.0F)
+                .next(Interpolation.QUADRATIC, 150, Utility.vec2h(devWidth, devHeight), -90.0F, 0.25F, 0.0F)
         );
         objectPool.add(new Animator()
                 .start(Tget("nsdn_nya"), Utility.vec2h(devWidth, devHeight), -90.0F, 2.0F, 0.0F)
                 .next(Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F, 1.0F)
                 .next(Interpolation.LINEAR, 200, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F)
-                .next(Interpolation.QUADRATIC, 150, Utility.vec2h(devWidth, devHeight), 45.0F, 0.05F, 0.0F)
+                .next(Interpolation.QUADRATIC, 150, Utility.vec2h(devWidth, devHeight), 45.0F, 0.25F, 0.0F)
         );
 
-        objectPool.add(new Exectuer() {
+        objectPool.add(new Exectuor() {
             @Override
             public Result onUpdate(int t) {
                 if (t == 500) {
                     objectPool.add(new Animator()
-                            .start(Tget("screen_1"), Utility.vec2h(devWidth, devHeight), -90.0F, 2.0F, 0.0F)
+                            .start(Tget("screen_1"), Utility.vec2h(devWidth, devHeight).add(256, 0), 0.0F, 1.5F, 0.0F)
                             .next(Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F, 1.0F)
                             .next(Interpolation.LINEAR, 200, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F)
-                            .next(Interpolation.QUADRATIC, 150, Utility.vec2h(devWidth, devHeight), 45.0F, 0.05F, 0.0F)
-                            .next(Tget("screen_2"), Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight), -90.0F, 2.0F, 0.0F)
+                            .next(Interpolation.QUADRATIC, 100, Utility.vec2h(devWidth, devHeight).add(-256, 0), 0.0F, 1.5F, 0.0F)
+
+                            .next(Tget("screen_2"), Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight).add(256, 0), 0.0F, 1.5F, 0.0F)
                             .next(Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F, 1.0F)
                             .next(Interpolation.LINEAR, 200, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F)
-                            .next(Interpolation.QUADRATIC, 150, Utility.vec2h(devWidth, devHeight), 45.0F, 0.05F, 0.0F)
-                            .next(Tget("screen_3"), Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight), -90.0F, 2.0F, 0.0F)
+                            .next(Interpolation.QUADRATIC, 100, Utility.vec2h(devWidth, devHeight).add(-256, 0), 0.0F, 1.5F, 0.0F)
+
+                            .next(Tget("screen_3"), Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight).add(256, 0), 0.0F, 1.5F, 0.0F)
                             .next(Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F, 1.0F)
                             .next(Interpolation.LINEAR, 200, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F)
-                            .next(Interpolation.QUADRATIC, 150, Utility.vec2h(devWidth, devHeight), 45.0F, 0.05F, 0.0F)
-                            .next(Tget("screen_4"), Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight), -90.0F, 2.0F, 0.0F)
+                            .next(Interpolation.QUADRATIC, 100, Utility.vec2h(devWidth, devHeight).add(-256, 0), 0.0F, 1.5F, 0.0F)
+
+                            .next(Tget("screen_4"), Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight).add(256, 0), 0.0F, 1.5F, 0.0F)
                             .next(Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F, 1.0F)
                             .next(Interpolation.LINEAR, 200, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F)
-                            .next(Interpolation.QUADRATIC, 150, Utility.vec2h(devWidth, devHeight), 45.0F, 0.05F, 0.0F)
-                            .next(Tget("screen_5"), Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight), -90.0F, 2.0F, 0.0F)
+                            .next(Interpolation.QUADRATIC, 100, Utility.vec2h(devWidth, devHeight).add(-256, 0), 0.0F, 1.5F, 0.0F)
+
+                            .next(Tget("screen_5"), Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight).add(256, 0), 0.0F, 1.5F, 0.0F)
                             .next(Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F, 1.0F)
                             .next(Interpolation.LINEAR, 200, Utility.vec2h(devWidth, devHeight), 0.0F, 1.0F)
-                            .next(Interpolation.QUADRATIC, 150, Utility.vec2h(devWidth, devHeight), 45.0F, 0.05F, 0.0F)
+                            .next(Interpolation.QUADRATIC, 100, Utility.vec2h(devWidth, devHeight).add(-256, 0), 0.0F, 1.5F, 0.0F)
                     );
+
+                    return Result.END;
+                }
+                return Result.DONE;
+            }
+        });
+        objectPool.add(new Exectuor() {
+            @Override
+            public Result onUpdate(int t) {
+                if (t == 3000) {
+                    objectPool.add(new Animator(Tget("nyasama"))
+                            .start(Utility.vec2h(devWidth, devHeight), 0.0F, 0.5F, 0.0F)
+                            .next(Interpolation.SINE, 100, Utility.vec2h(devWidth, devHeight), 0.0F, 0.5F, 1.0F)
+                            .next(Interpolation.LINEAR, 300, Utility.vec2h(devWidth, devHeight), 0.0F, 0.5F)
+                            .next(Interpolation.QUADRATIC, 100, Utility.vec2h(devWidth, devHeight), 0.0F, 0.5F, 0.0F)
+                    );
+
                     return Result.END;
                 }
                 return Result.DONE;
@@ -173,29 +225,4 @@ public class NSGDX extends ApplicationAdapter {
         });
     }
 
-	private void doControl(Player player) {
-		Vector2 vel = Vector2.Zero;
-
-		if (Gdx.input.isKeyPressed(Input.Keys.UP)) vel.y = 1;
-		if (Gdx.input.isKeyPressed(Input.Keys.DOWN)) vel.y = -1;
-		if (Gdx.input.isKeyPressed(Input.Keys.LEFT)) vel.x = -1;
-		if (Gdx.input.isKeyPressed(Input.Keys.RIGHT)) vel.x = 1;
-
-		if (Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT))
-			vel.scl(2.0F);
-		else
-			vel.scl(5.0F);
-
-		if (Gdx.input.isTouched()) {
-			vel.x = Gdx.input.getDeltaX();
-			vel.y = -Gdx.input.getDeltaY();
-		}
-
-		player.move(vel);
-	}
-	
-	@Override
-	public void dispose() {
-		threadPoolExecutor.shutdown();
-	}
 }

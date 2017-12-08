@@ -4,6 +4,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.math.Vector2;
 import cn.ac.nya.nsgdx.utility.IObject;
 import cn.ac.nya.nsgdx.utility.Renderer;
+import cn.ac.nya.nsgdx.utility.Utility;
 
 import java.util.LinkedList;
 
@@ -31,7 +32,7 @@ public class Animator implements IObject {
         private State(Texture tex, Interpolation inter) {
             this.tex = tex;
             this.inter = inter;
-            pos = Vector2.Zero;
+            pos = Utility.vec2(0, 0);
             rotate = scale = 0;
             r = g = b = a = 1.0F;
         }
@@ -151,7 +152,7 @@ public class Animator implements IObject {
     }
 
     private Vector2 interpolation(Interpolation inter, Vector2 original, Vector2 destination, int step, int length) {
-        Vector2 result = Vector2.Zero;
+        Vector2 result = Utility.vec2(0, 0);
         result.x = interpolation(inter, original.x, destination.x, step, length);
         result.y = interpolation(inter, original.y, destination.y, step, length);
 

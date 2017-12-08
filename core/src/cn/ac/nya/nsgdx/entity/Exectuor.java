@@ -7,7 +7,7 @@ import cn.ac.nya.nsgdx.utility.Renderer;
  * Created by drzzm on 2017.12.7.
  */
 
-public abstract class Exectuer implements IObject {
+public abstract class Exectuor implements IObject {
 
     @Override
     public abstract Result onUpdate(int t);

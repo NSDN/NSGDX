@@ -12,7 +12,7 @@ public class Utility {
     }
 
     public static Vector2 vec2(float x, float y) {
-        return Vector2.Zero.set(x, y);
+        return Vector2.Zero.cpy().set(x, y);
     }
 
     public static Vector2 vec2h(float x, float y) {

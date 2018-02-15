@@ -22,6 +22,7 @@ public abstract class Player implements IObject {
         this.tex = tex;
         pos = Utility.vec2(0, 0);
         dir = Utility.vec2(0, 0);
+        eye = Utility.vec2(0, 0);
     }
 
     public void flash(Vector2 vec) {
@@ -38,7 +39,7 @@ public abstract class Player implements IObject {
 
     @Override
     public Result onUpdate(int t) {
-        dir = eye.sub(pos);
+        dir = pos.cpy().sub(eye);
         return Result.DONE;
     }
 

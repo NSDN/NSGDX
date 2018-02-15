@@ -15,6 +15,7 @@ public abstract class Bullet implements IObject {
     protected Vector2 pos;
     protected Vector2 vel;
     protected Vector2 acc;
+    protected Vector2 aim;
     protected Vector2 dir;
 
     private Texture tex;
@@ -23,23 +24,38 @@ public abstract class Bullet implements IObject {
 
     public boolean grazed;
 
-    public Bullet(Vector2 pos, Vector2 dir, Texture tex) {
-        this(pos, dir, tex, 1.0F);
+    public Bullet(Vector2 pos, Vector2 aim, Texture tex) {
+        this(pos, aim, tex, 1.0F);
     }
 
-    public Bullet(Vector2 pos, Vector2 dir, Texture tex, float scale) {
-        this.pos = pos; this.dir = dir;
+    public Bullet(Vector2 pos, Vector2 aim, Texture tex, float scale) {
+        this.pos = pos.cpy(); this.aim = aim.cpy();
         this.tex = tex; this.scale = scale;
 
         vel = Utility.vec2(0, 0); acc = Utility.vec2(0, 0);
+        dir = Utility.vec2(0, 0);
         r = g = b = a = 1.0F;
 
         grazed = false;
     }
 
+    public Bullet setVel(Vector2 vel) { this.vel = vel.cpy(); return this; }
+    
+    public Bullet setAcc(Vector2 acc) { this.acc = acc.cpy(); return this; }
+
+    public Bullet setColor(float r, float g, float b) {
+        return setColor(r, g, b, 1.0F);
+    }
+
+    public Bullet setColor(float r, float g, float b, float a) {
+        this.r = r; this.g = g; this.b = b; this.a = a;
+        return this;
+    }
+
     public Result onUpdate(int t) {
         vel = vel.add(acc);
         pos = pos.add(vel);
+        dir = pos.cpy().sub(aim);
         return Result.DONE;
     }
 

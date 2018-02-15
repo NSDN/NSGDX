@@ -45,9 +45,11 @@ public class NyaEgg extends NSGDX {
         public Result onUpdate(int t) {
             if (t == this.t) {
                 Vector2 center = Utility.vec2h(devWidth, devHeight);
-                Bullet[] bullets = new Bullet[128];
+                Bullet[] bullets = new Bullet[64];
                 for (int i = 0; i < bullets.length; i++) {
                     float angle = (float) i / (float) bullets.length * 360.0F;
+                    angle += (360.0F * (float) Math.abs(Math.sin((float) t / 256.0F)));
+                    angle %= 360.0F;
                     Vector2 pos = Utility.vec2(1.0F, 0.0F).rotate(angle).nor().scl(8.0F);
                     bullets[i] = new Bullet(center.cpy().add(pos), center, get("arrow"));
                     Vector2 vec = Utility.vec2(1.0F, 0.0F).rotate(angle);
@@ -68,7 +70,7 @@ public class NyaEgg extends NSGDX {
     protected void render(Renderer renderer) {
         renderer.begin();
         renderer.drawString(4, 16, 1, Color.WHITE, "frame: " + counter());
-        renderer.drawString(4, devHeight - 8, 1, Color.WHITE, poolCluster.toString());
+        renderer.drawString(4, devHeight - 4, 1, Color.WHITE, poolCluster.toString());
         renderer.end();
     }
 
@@ -84,9 +86,9 @@ public class NyaEgg extends NSGDX {
         poolCluster.add(new Exectuor() {
             @Override
             public Result onUpdate(int t) {
-                if (t % 640 == 0) {
+                if ((t % 320) == 0) {
                     for (int i = 1; i <= 64; i++)
-                        poolCluster.add(new Launcher(i * 10 + t));
+                        poolCluster.add(new Launcher(i * 5 + t));
                 }
                 return Result.DONE;
             }

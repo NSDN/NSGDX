@@ -36,15 +36,21 @@ public class NyaEgg extends NSGDX {
     public class Launcher extends Exectuor {
 
         private int t;
+        private Vector2 center;
 
         public Launcher(int t) {
             this.t = t;
+            this.center = Utility.vec2h(devWidth, devHeight);
+        }
+
+        public Launcher(int t, Vector2 center) {
+            this.t = t;
+            this.center = center.cpy();
         }
 
         @Override
         public Result onUpdate(int t) {
             if (t == this.t) {
-                Vector2 center = Utility.vec2h(devWidth, devHeight);
                 Bullet[] bullets = new Bullet[64];
                 for (int i = 0; i < bullets.length; i++) {
                     float angle = (float) i / (float) bullets.length * 360.0F;
@@ -55,6 +61,8 @@ public class NyaEgg extends NSGDX {
                     Vector2 vec = Utility.vec2(1.0F, 0.0F).rotate(angle);
                     bullets[i].setVel(vec).setAcc(vec.rotate(90).scl(0.05F));
 
+                    angle = colorMod(t, angle);
+                    angle %= 360.0F;
                     Utility.Color3 color = Utility.hsv2RGB(angle, 1.0F, 1.0F);
                     bullets[i].setColor(color.r, color.g, color.b);
 
@@ -63,6 +71,12 @@ public class NyaEgg extends NSGDX {
                 return Result.END;
             }
             return Result.DONE;
+        }
+
+        public float colorMod(int t, float angle) {
+            if ((t % 1280) < 640) angle = (float) t;
+            else angle += (t % 360);
+            return angle;
         }
     }
 

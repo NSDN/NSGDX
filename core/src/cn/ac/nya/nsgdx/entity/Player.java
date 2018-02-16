@@ -12,21 +12,31 @@ import cn.ac.nya.nsgdx.utility.Utility;
 
 public abstract class Player implements IObject {
 
-    private Texture tex;
-
     protected Vector2 pos;
-    private Vector2 dir;
-    private Vector2 eye;
+    protected Vector2 dir;
+    protected Vector2 eye;
+
+    private Texture[] tex;
+    protected float scale;
 
     public Player(Texture tex) {
+        this.tex = new Texture[] { tex };
+        pos = Utility.vec2(0, 0);
+        dir = Utility.vec2(0, 0);
+        eye = Utility.vec2(0, 0);
+        scale = 1.0F;
+    }
+
+    public Player(Texture[] tex) {
         this.tex = tex;
         pos = Utility.vec2(0, 0);
         dir = Utility.vec2(0, 0);
         eye = Utility.vec2(0, 0);
+        scale = 1.0F;
     }
 
     public void flash(Vector2 vec) {
-        pos = vec;
+        pos = vec.cpy();
     }
 
     public void move(Vector2 vec) {
@@ -34,7 +44,7 @@ public abstract class Player implements IObject {
     }
 
     public void look(Vector2 vec) {
-        eye = vec;
+        eye = vec.cpy();
     }
 
     @Override
@@ -45,7 +55,8 @@ public abstract class Player implements IObject {
 
     @Override
     public Result onRender(Renderer renderer) {
-        renderer.draw(tex, pos.x, pos.y, dir.angle(), 1.0F);
+        for (Texture t : tex)
+            renderer.draw(t, pos.x, pos.y, dir.angle(), scale);
         return Result.DONE;
     }
 }

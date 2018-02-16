@@ -158,10 +158,6 @@ public class ObjectPoolCluster {
         poolTask.remove(pool);
     }
 
-    private int getPoolSize(ObjectPool pool) {
-        return pool.size();
-    }
-
     public ObjectPool first() {
         return poolCluster.getFirst();
     }
@@ -191,7 +187,16 @@ public class ObjectPoolCluster {
                 last().removeLast();
             }
         }
-        poolCluster.sort(Comparator.comparingInt(this::getPoolSize));
+        doSort();
+    }
+
+    private void doSort() {
+        ObjectPool[] objects = poolCluster.toArray(new ObjectPool[]{});
+        Arrays.sort(objects, (a, b) -> a.size() - b.size());
+        ListIterator<ObjectPool> it = this.poolCluster.listIterator();
+        for (ObjectPool e : objects) {
+            it.next(); it.set(e);
+        }
     }
 
     public void clear() {

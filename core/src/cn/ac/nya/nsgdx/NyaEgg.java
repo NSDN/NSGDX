@@ -1,8 +1,6 @@
-package com.nyasama.egg;
+package cn.ac.nya.nsgdx;
 
-import cn.ac.nya.nsgdx.NSGDX;
 import cn.ac.nya.nsgdx.entity.Exectuor;
-import cn.ac.nya.nsgdx.utility.IObject;
 import cn.ac.nya.nsgdx.utility.Renderer;
 import cn.ac.nya.nsgdx.utility.Utility;
 
@@ -100,8 +98,8 @@ public class NyaEgg extends NSGDX {
         poolCluster.add(new Exectuor() {
             @Override
             public Result onUpdate(int t) {
-                if ((t % 320) == 0) {
-                    for (int i = 1; i <= 64; i++)
+                if ((t % 640) == 0) {
+                    for (int i = 1; i <= 128; i++)
                         poolCluster.add(new Launcher(i * 5 + t));
                 }
                 return Result.DONE;

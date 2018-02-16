@@ -3,7 +3,7 @@ package cn.ac.nya.nsgdx.desktop;
 import com.badlogic.gdx.backends.lwjgl.LwjglApplication;
 import com.badlogic.gdx.backends.lwjgl.LwjglApplicationConfiguration;
 
-import com.nyasama.egg.NyaEgg;
+import cn.ac.nya.nsgdx.NyaEgg;
 
 public class DesktopLauncher {
 	public static void main (String[] arg) {

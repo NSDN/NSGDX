@@ -1,6 +1,5 @@
-package com.nyasama.about;
+package cn.ac.nya.nsgdx;
 
-import cn.ac.nya.nsgdx.NSGDX;
 import cn.ac.nya.nsgdx.entity.Animator;
 import cn.ac.nya.nsgdx.entity.Exectuor;
 import cn.ac.nya.nsgdx.utility.Renderer;
@@ -13,6 +12,13 @@ import com.badlogic.gdx.graphics.Color;
  * Created by drzzm on 2018.2.14.
  */
 public class NyaAbout extends NSGDX {
+
+    private Runnable exitCallback;
+
+    public NSGDX setOnExitCallback(Runnable exitCallback) {
+        this.exitCallback = exitCallback;
+        return this;
+    }
 
     @Override
     protected void render(Renderer renderer) {
@@ -93,6 +99,16 @@ public class NyaAbout extends NSGDX {
                             .next(Animator.Interpolation.QUADRATIC, 100, Utility.vec2h(devWidth, devHeight), 0.0F, 0.5F, 0.0F)
                     );
 
+                    return Result.END;
+                }
+                return Result.DONE;
+            }
+        });
+        poolCluster.add(new Exectuor() {
+            @Override
+            public Result onUpdate(int t) {
+                if (t == 3600) {
+                    exitCallback.run();
                     return Result.END;
                 }
                 return Result.DONE;

@@ -7,13 +7,13 @@ import java.util.*;
  */
 public class NSASM {
 
-    public static final String version = "0.30 (Java)";
+    public static final String version = "0.45 (Java)";
 
-    protected enum RegType {
-        CHAR, STR, INT, FLOAT
+    public enum RegType {
+        CHAR, STR, INT, FLOAT, CODE, MAP
     }
 
-    protected class Register {
+    public class Register {
         public RegType type;
         public Object data;
         public int strPtr = 0;
@@ -21,9 +21,24 @@ public class NSASM {
 
         @Override
         public String toString() {
-            return "Type: " + type.name() + "\n" +
-                    "Data: " + data.toString() + "\n" +
-                    "ReadOnly: " + readOnly;
+            switch (type) {
+                case CODE:
+                    return "(\n" + data.toString() + "\n)";
+                default:
+                    return data.toString();
+            }
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (obj instanceof Register)
+                return type.equals(((Register) obj).type) && data.equals(((Register) obj).data);
+            return false;
+        }
+
+        @Override
+        public int hashCode() {
+            return data.hashCode();
         }
 
         public void copy(Register reg) {
@@ -32,23 +47,46 @@ public class NSASM {
             strPtr = reg.strPtr;
             readOnly = reg.readOnly;
         }
+
+        public Register() {}
+
+        public Register(Register reg) {
+            copy(reg);
+        }
     }
 
-    protected interface Operator {
+    public class Map extends LinkedHashMap<Register, Register> {
+        public Map() { super(); }
+
+        @Override
+        public String toString() {
+            String str = "M(\n";
+            for (Register key : keySet()) {
+                str = str.concat(key.toString() + "->" + get(key).toString() + "\n");
+            }
+            str += ")";
+
+            return str;
+        }
+    }
+
+    public interface Operator {
         Result run(Register dst, Register src);
     }
 
     private LinkedHashMap<String, Register> heapManager;
     private LinkedList<Register> stackManager;
-    private int stackSize;
+    private int heapSize, stackSize, regCnt;
+    protected Register useReg;
     protected Register[] regGroup;
     private Register stateReg;
+    private Register prevDstReg;
 
     private LinkedList<Integer> backupReg;
     private int progSeg, tmpSeg;
     private int progCnt, tmpCnt;
 
-    protected LinkedHashMap<String, Operator> funList;
+    protected LinkedHashMap<String, Operator> funcList;
     private LinkedHashMap<String, String[]> code;
 
     public enum Result {
@@ -57,10 +95,12 @@ public class NSASM {
 
     private enum WordType {
         REG, CHAR, STR, INT,
-        FLOAT, VAR, TAG, SEG
+        FLOAT, VAR, TAG, SEG,
+        CODE, MAP
     }
 
     private boolean verifyBound(String var, char left, char right) {
+        if (var.isEmpty()) return false;
         return var.charAt(0) == left && var.charAt(var.length() - 1) == right;
     }
 
@@ -91,15 +131,22 @@ public class NSASM {
                     (var.charAt(0) >= '0' && var.charAt(0) <= '9') ||
                     var.charAt(0) == '-' || var.charAt(0) == '+'
                 ) && (!var.startsWith("0x") || !var.startsWith("0X"));
-            case VAR:
-                return !verifyWord(var, WordType.REG) && !verifyWord(var, WordType.CHAR) &&
-                       !verifyWord(var, WordType.STR) && !verifyWord(var, WordType.INT) &&
-                       !verifyWord(var, WordType.FLOAT) && !verifyWord(var, WordType.TAG) &&
-                       !verifyWord(var, WordType.SEG);
             case TAG:
                 return verifyBound(var, '[', ']');
             case SEG:
                 return verifyBound(var, '<', '>');
+            case CODE:
+                return verifyBound(var, '(', ')');
+            case MAP:
+                if (var.charAt(0) == 'm' || var.charAt(0) == 'M')
+                    return verifyBound(var.substring(1), '(', ')');
+                else return false;
+            case VAR:
+                return !verifyWord(var, WordType.REG) && !verifyWord(var, WordType.CHAR) &&
+                    !verifyWord(var, WordType.STR) && !verifyWord(var, WordType.INT) &&
+                    !verifyWord(var, WordType.FLOAT) && !verifyWord(var, WordType.TAG) &&
+                    !verifyWord(var, WordType.SEG) && !verifyWord(var, WordType.CODE) &&
+                    !verifyWord(var, WordType.MAP);
         }
         return false;
     }
@@ -124,6 +171,8 @@ public class NSASM {
                 if (var.charAt(1) == '\\') {
                     if (var.length() < 4) return null;
                     switch (var.charAt(2)) {
+                        case '0': tmp = '\0'; break;
+                        case 'b': tmp = '\b'; break;
                         case 'n': tmp = '\n'; break;
                         case 'r': tmp = '\r'; break;
                         case 't': tmp = '\t'; break;
@@ -139,19 +188,22 @@ public class NSASM {
                 if (var.length() < 3) return null;
                 String tmp, rep;
                 try {
-                    if (var.split("\"").length > 2) {
-                        tmp = rep = var.split("\"")[1];
-                        Register repeat = getRegister(var.split("\"")[2].replace("*", ""));
+                    if (var.contains("*")) {
+                        tmp = rep = var.split("\"\\*")[0].substring(1);
+                        Register repeat = getRegister(var.split("\"\\*")[1]);
                         if (repeat == null) return null;
                         if (repeat.type != RegType.INT) return null;
                         for (int i = 1; i < (int) repeat.data; i++)
                             tmp = tmp.concat(rep);
                     } else {
-                        tmp = var.split("\"")[1];
+                        tmp = var.substring(1, var.length() - 1);
                     }
                 } catch (Exception e) {
                     return null;
                 }
+
+                tmp = Util.formatString(tmp);
+
                 register.type = RegType.STR;
                 register.readOnly = true;
                 register.data = tmp;
@@ -197,6 +249,26 @@ public class NSASM {
                 register.type = RegType.STR;
                 register.readOnly = true;
                 register.data = var;
+            } else if (verifyWord(var, WordType.CODE)) {
+                register.type = RegType.CODE;
+                register.readOnly = true;
+                String code = var.substring(1, var.length() - 1);
+                code = Util.decodeLambda(code);
+                register.data = code;
+            } else if (verifyWord(var, WordType.MAP)) {
+                String code = var.substring(2, var.length() - 1);
+
+                register = new Register();
+                register.type = RegType.MAP;
+                register.readOnly = true;
+                register.data = new Map();
+                code = Util.decodeLambda(code);
+                funcList.get("mov").run(regGroup[regCnt], register);
+
+                Register reg = new Register();
+                reg.type = RegType.CODE; reg.readOnly = true;
+                reg.data = code + "\n" + "ret r" + regCnt + "\n";
+                register = eval(reg);
             } else return null;
             return register;
         }
@@ -212,7 +284,8 @@ public class NSASM {
             if (
                 operator.equals("var") || operator.equals("int") ||
                 operator.equals("char") || operator.equals("float") ||
-                operator.equals("str")
+                operator.equals("str") || operator.equals("code") ||
+                operator.equals("map")
             ) { //Variable define
                 dst = var.substring(operator.length() + 1).split("=")[0];
                 if (var.length() <= operator.length() + 1 + dst.length()) return Result.ERR;
@@ -242,17 +315,69 @@ public class NSASM {
             }
         }
 
-        if (!funList.containsKey(operator))
+        if (!funcList.containsKey(operator))
             return verifyWord(operator, WordType.TAG) ? Result.OK : Result.ERR;
 
-        return funList.get(operator).run(dr, sr);
+        prevDstReg = dr != null ? dr : prevDstReg;
+        return funcList.get(operator).run(dr, sr);
     }
 
-    public void run() {
-        if (code == null) return;
+    public Register run() {
+        if (code == null) return null;
         Result result; String segBuf, codeBuf;
 
         progSeg = progCnt = 0;
+
+        for (; progSeg < code.keySet().size(); progSeg++) {
+            segBuf = (String) (code.keySet().toArray())[progSeg];
+            if (code.get(segBuf) == null) continue;
+
+            for (; progCnt < code.get(segBuf).length; progCnt++) {
+                if (tmpSeg >= 0 || tmpCnt >= 0) {
+                    progSeg = tmpSeg; progCnt = tmpCnt;
+                    tmpSeg = -1; tmpCnt = -1;
+                }
+
+                segBuf = (String) (code.keySet().toArray())[progSeg];
+                if (code.get(segBuf) == null) break;
+                codeBuf = code.get(segBuf)[progCnt];
+
+                if (codeBuf.length() == 0) {
+                    continue;
+                }
+
+                result = execute(codeBuf);
+                if (result == Result.ERR) {
+                    Util.print("\nNSASM running error!\n");
+                    Util.print("At "+ segBuf + ", line " + (progCnt + 1) + ": " + codeBuf + "\n\n");
+                    return null;
+                } else if (result == Result.ETC) {
+                    if (prevDstReg != null) prevDstReg.readOnly = false;
+                    return prevDstReg;
+                }
+            }
+
+            if (!backupReg.isEmpty()) {
+                progCnt = backupReg.pop() + 1;
+                progSeg = backupReg.pop() - 1;
+            } else progCnt = 0;
+        }
+
+        if (prevDstReg != null) prevDstReg.readOnly = false;
+        return prevDstReg;
+    }
+
+    public void call(String segName) {
+        Result result; String segBuf, codeBuf;
+
+        for (int seg = 0; seg < code.keySet().size(); seg++) {
+            segBuf = (String) (code.keySet().toArray())[seg];
+            if (segName.equals(segBuf)) {
+                progSeg = seg;
+                progCnt = 0;
+                break;
+            }
+        }
 
         for (; progSeg < code.keySet().size(); progSeg++) {
             segBuf = (String) (code.keySet().toArray())[progSeg];
@@ -287,6 +412,13 @@ public class NSASM {
                 progSeg = backupReg.pop() - 1;
             } else progCnt = 0;
         }
+    }
+
+    protected Register eval(Register register) {
+        if (register == null) return null;
+        if (register.type != RegType.CODE) return null;
+        String[][] code = Util.getSegments(register.data.toString());
+        return new NSASM(this, code).run();
     }
 
     private String[] convToArray(String var) {
@@ -325,10 +457,22 @@ public class NSASM {
         return Result.OK;
     }
 
+    private void copyRegGroup(NSASM base) {
+        for (int i = 0; i < base.regGroup.length; i++)
+            this.regGroup[i].copy(base.regGroup[i]);
+    }
+
+    private NSASM(NSASM base, String[][] code) {
+        this(base.heapSize, base.stackSize, base.regCnt, code);
+        copyRegGroup(base);
+    }
+
     public NSASM(int heapSize, int stackSize, int regCnt, String[][] code) {
         heapManager = new LinkedHashMap<>(heapSize);
         stackManager = new LinkedList<>();
+        this.heapSize = heapSize;
         this.stackSize = stackSize;
+        this.regCnt = regCnt;
 
         stateReg = new Register();
         stateReg.data = 0;
@@ -339,16 +483,17 @@ public class NSASM {
         progSeg = 0; progCnt = 0;
         tmpSeg = -1; tmpCnt = -1;
 
-        regGroup = new Register[regCnt];
+        regGroup = new Register[regCnt + 1];
         for (int i = 0; i < regGroup.length; i++) {
             regGroup[i] = new Register();
-            regGroup[i].type = RegType.CHAR;
+            regGroup[i].type = RegType.INT;
             regGroup[i].readOnly = false;
             regGroup[i].data = 0;
         }
+        useReg = regGroup[regCnt];
 
-        funList = new LinkedHashMap<>();
-        loadFunList();
+        funcList = new LinkedHashMap<>();
+        loadFuncList();
 
         this.code = new LinkedHashMap<>();
         if (appendCode(code) == Result.ERR) {
@@ -356,7 +501,7 @@ public class NSASM {
             this.code.clear();
         }
     }
-
+    
     private Object convValue(Object value, RegType type) {
         switch (type) {
             case INT:
@@ -420,6 +565,8 @@ public class NSASM {
             case '-': dst.strPtr = dst.strPtr - (int) convValue(src.data, RegType.INT); break;
             default: return Result.ERR;
         }
+        if (dst.strPtr >= dst.data.toString().length()) dst.strPtr = dst.data.toString().length() - 1;
+        if (dst.strPtr < 0) dst.strPtr = 0;
         return Result.OK;
     }
 
@@ -437,12 +584,12 @@ public class NSASM {
         return Result.OK;
     }
 
-    protected void loadFunList() {
-        funList.put("rem", (dst, src) -> {
+    protected void loadFuncList() {
+        funcList.put("rem", (dst, src) -> {
             return Result.OK;
         });
 
-        funList.put("var", (dst, src) -> {
+        funcList.put("var", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (!verifyWord((String) dst.data, WordType.VAR)) return Result.ERR;
@@ -452,51 +599,79 @@ public class NSASM {
             return Result.OK;
         });
 
-        funList.put("int", (dst, src) -> {
+        funcList.put("int", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (!verifyWord((String) dst.data, WordType.VAR)) return Result.ERR;
             if (heapManager.containsKey((String) dst.data)) return Result.ERR;
-            if (src.type != RegType.STR) src.readOnly = false;
             if (src.type != RegType.INT) return Result.ERR;
+
+            src.readOnly = false;
             heapManager.put((String) dst.data, src);
             return Result.OK;
         });
 
-        funList.put("char", (dst, src) -> {
+        funcList.put("char", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (!verifyWord((String) dst.data, WordType.VAR)) return Result.ERR;
             if (heapManager.containsKey((String) dst.data)) return Result.ERR;
-            if (src.type != RegType.STR) src.readOnly = false;
             if (src.type != RegType.CHAR) return Result.ERR;
+
+            src.readOnly = false;
             heapManager.put((String) dst.data, src);
             return Result.OK;
         });
 
-        funList.put("float", (dst, src) -> {
+        funcList.put("float", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (!verifyWord((String) dst.data, WordType.VAR)) return Result.ERR;
             if (heapManager.containsKey((String) dst.data)) return Result.ERR;
-            if (src.type != RegType.STR) src.readOnly = false;
             if (src.type != RegType.FLOAT) return Result.ERR;
+
+            src.readOnly = false;
             heapManager.put((String) dst.data, src);
             return Result.OK;
         });
 
-        funList.put("str", (dst, src) -> {
+        funcList.put("str", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (!verifyWord((String) dst.data, WordType.VAR)) return Result.ERR;
             if (heapManager.containsKey((String) dst.data)) return Result.ERR;
-            if (src.type != RegType.STR) src.readOnly = false;
             if (src.type != RegType.STR) return Result.ERR;
+
+            src.readOnly = true;
             heapManager.put((String) dst.data, src);
             return Result.OK;
         });
 
-        funList.put("mov", (dst, src) -> {
+        funcList.put("code", (dst, src) -> {
+            if (src == null) return Result.ERR;
+            if (dst == null) return Result.ERR;
+            if (!verifyWord((String) dst.data, WordType.VAR)) return Result.ERR;
+            if (heapManager.containsKey((String) dst.data)) return Result.ERR;
+            if (src.type != RegType.CODE) return Result.ERR;
+
+            src.readOnly = false;
+            heapManager.put((String) dst.data, src);
+            return Result.OK;
+        });
+
+        funcList.put("map", (dst, src) -> {
+            if (src == null) return Result.ERR;
+            if (dst == null) return Result.ERR;
+            if (!verifyWord((String) dst.data, WordType.VAR)) return Result.ERR;
+            if (heapManager.containsKey((String) dst.data)) return Result.ERR;
+            if (src.type != RegType.MAP) return Result.ERR;
+
+            src.readOnly = false;
+            heapManager.put((String) dst.data, src);
+            return Result.OK;
+        });
+
+        funcList.put("mov", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
@@ -513,7 +688,7 @@ public class NSASM {
             return Result.OK;
         });
 
-        funList.put("push", (dst, src) -> {
+        funcList.put("push", (dst, src) -> {
             if (src != null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (stackManager.size() >= stackSize) return Result.ERR;
@@ -521,7 +696,7 @@ public class NSASM {
             return Result.OK;
         });
 
-        funList.put("pop", (dst, src) -> {
+        funcList.put("pop", (dst, src) -> {
             if (src != null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
@@ -529,7 +704,7 @@ public class NSASM {
             return Result.OK;
         });
 
-        funList.put("in", (dst, src) -> {
+        funcList.put("in", (dst, src) -> {
             if (src == null) {
                 src = new Register();
                 src.type = RegType.INT;
@@ -537,6 +712,7 @@ public class NSASM {
                 src.readOnly = true;
             }
             if (dst == null) return Result.ERR;
+			if (src.type != RegType.INT) return Result.ERR;
             String buf; Register reg;
             switch ((int) src.data) {
                 case 0x00:
@@ -600,44 +776,109 @@ public class NSASM {
             return Result.OK;
         });
 
-        funList.put("out", (dst, src) -> {
-            if (src == null) return Result.ERR;
+        funcList.put("out", (dst, src) -> {
             if (dst == null) return Result.ERR;
-            switch ((int) dst.data) {
-                case 0x00:
-                    if (src.type == RegType.STR) {
-                        Util.print(((String) src.data).substring(src.strPtr));
-                    } else Util.print(src.data);
-                    break;
-                case 0xFF:
-                    Util.print("[DEBUG] >>> ");
-                    if (src.type == RegType.STR) {
-                        Util.print(((String) src.data).substring(src.strPtr));
-                    } else Util.print(src.data);
-                    break;
-                default:
+            if (src == null) {
+                if (dst.type == RegType.STR) {
+                    Util.print(((String) dst.data).substring(dst.strPtr));
+                } else if (dst.type == RegType.CODE) {
+                    Register register = eval(dst);
+                    if (register == null) return Result.ERR;
+                    Util.print(register.data);
+                } else Util.print(dst.data);
+            } else {
+                if (dst.type != RegType.INT)
                     return Result.ERR;
+                switch ((int) dst.data) {
+                    case 0x00:
+                        if (src.type == RegType.STR) {
+                            Util.print(((String) src.data).substring(src.strPtr));
+                        } else if (src.type == RegType.CODE) {
+                            Register register = eval(src);
+                            if (register == null) return Result.ERR;
+                            Util.print(register.data);
+                        } else Util.print(src.data);
+                        break;
+                    case 0xFF:
+                        Util.print("[DEBUG] >>> ");
+                        if (src.type == RegType.STR) {
+                            Util.print(((String) src.data).substring(src.strPtr));
+                        } else if (src.type == RegType.CODE) {
+                            Register register = eval(src);
+                            if (register == null) return Result.ERR;
+                            Util.print(register.data);
+                        } else Util.print(src.data);
+                        Util.print('\n');
+                        break;
+                    default:
+                        return Result.ERR;
+                }
             }
             return Result.OK;
         });
 
-        funList.put("prt", (dst, src) -> {
-            if (src != null) return Result.ERR;
+        funcList.put("prt", (dst, src) -> {
             if (dst == null) return Result.ERR;
-            if (dst.type == RegType.STR) {
-                Util.print(((String) dst.data).substring(dst.strPtr) + '\n');
-            } else Util.print(dst.data.toString() + '\n');
+            if (src != null) {
+                if (dst.type == RegType.STR) {
+                    if (dst.readOnly) return Result.ERR;
+                    if (src.type == RegType.CHAR && src.data.equals('\b')) {
+                        if (dst.data.toString().contains("\n")) {
+                            String[] parts = dst.data.toString().split("\n");
+                            String res = "";
+                            for (int i = 0; i < parts.length - 1; i++) {
+                                res = res.concat(parts[i]);
+                                if (i < parts.length - 2) res = res.concat("\n");
+                            }
+                        }
+                    } else if (src.type == RegType.CODE) {
+                        Register register = eval(src);
+                        if (register == null) return Result.ERR;
+                        dst.data = dst.data.toString().concat('\n' + register.data.toString());
+                    } else if (src.type == RegType.STR) {
+                        dst.data = dst.data.toString().concat('\n' + src.data.toString());
+                    } else return Result.ERR;
+                } else if (dst.type == RegType.CODE) {
+                    if (dst.readOnly) return Result.ERR;
+                    if (src.type == RegType.CHAR && src.data.equals('\b')) {
+                        if (dst.data.toString().contains("\n")) {
+                            String[] parts = dst.data.toString().split("\n");
+                            String res = "";
+                            for (int i = 0; i < parts.length - 1; i++) {
+                                res = res.concat(parts[i]);
+                                if (i < parts.length - 2) res = res.concat("\n");
+                            }
+                        }
+                    } else if (src.type == RegType.CODE) {
+                        dst.data = dst.data.toString().concat('\n' + src.data.toString());
+                    } else if (src.type == RegType.STR) {
+                        dst.data = dst.data.toString().concat('\n' + src.data.toString());
+                    } else return Result.ERR;
+                } else return Result.ERR;
+            } else {
+                if (dst == null) return Result.ERR;
+                if (dst.type == RegType.STR) {
+                    Util.print(((String) dst.data).substring(dst.strPtr) + '\n');
+                } else if (dst.type == RegType.CODE) {
+                    Register register = eval(dst);
+                    if (register == null) return Result.ERR;
+                    Util.print(register.data.toString() + '\n');
+                } else Util.print(dst.data.toString() + '\n');
+            }
             return Result.OK;
         });
 
-        funList.put("add", (dst, src) -> {
+        funcList.put("add", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
-            return calc(dst, src, '+');
+            if (src.type == RegType.CODE)
+                return calc(dst, eval(src), '+');
+            else
+                return calc(dst, src, '+');
         });
 
-        funList.put("inc", (dst, src) -> {
+        funcList.put("inc", (dst, src) -> {
             if (src != null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
@@ -648,14 +889,17 @@ public class NSASM {
             return calc(dst, register, '+');
         });
 
-        funList.put("sub", (dst, src) -> {
+        funcList.put("sub", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
-            return calc(dst, src, '-');
+            if (src.type == RegType.CODE)
+                return calc(dst, eval(src), '-');
+            else
+                return calc(dst, src, '-');
         });
 
-        funList.put("dec", (dst, src) -> {
+        funcList.put("dec", (dst, src) -> {
             if (src != null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
@@ -666,73 +910,118 @@ public class NSASM {
             return calc(dst, register, '-');
         });
 
-        funList.put("mul", (dst, src) -> {
+        funcList.put("mul", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
-            return calc(dst, src, '*');
+            if (src.type == RegType.CODE)
+                return calc(dst, eval(src), '*');
+            else
+                return calc(dst, src, '*');
         });
 
-        funList.put("div", (dst, src) -> {
+        funcList.put("div", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
-            return calc(dst, src, '/');
+            if (src.type == RegType.CODE)
+                return calc(dst, eval(src), '/');
+            else
+                return calc(dst, src, '/');
         });
 
-        funList.put("and", (dst, src) -> {
+        funcList.put("and", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
-            return calc(dst, src, '&');
+            if (src.type == RegType.CODE)
+                return calc(dst, eval(src), '&');
+            else
+                return calc(dst, src, '&');
         });
 
-        funList.put("or", (dst, src) -> {
+        funcList.put("or", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
-            return calc(dst, src, '|');
+            if (src.type == RegType.CODE)
+                return calc(dst, eval(src), '|');
+            else
+                return calc(dst, src, '|');
         });
 
-        funList.put("xor", (dst, src) -> {
+        funcList.put("xor", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
-            return calc(dst, src, '^');
+            if (src.type == RegType.CODE)
+                return calc(dst, eval(src), '^');
+            else
+                return calc(dst, src, '^');
         });
 
-        funList.put("not", (dst, src) -> {
+        funcList.put("not", (dst, src) -> {
             if (src != null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
             return calc(dst, null, '~');
         });
 
-        funList.put("shl", (dst, src) -> {
+        funcList.put("shl", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
-            return calc(dst, src, '<');
+            if (src.type == RegType.CODE)
+                return calc(dst, eval(src), '<');
+            else
+                return calc(dst, src, '<');
         });
 
-        funList.put("shr", (dst, src) -> {
+        funcList.put("shr", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.readOnly) return Result.ERR;
-            return calc(dst, src, '>');
+            if (src.type == RegType.CODE)
+                return calc(dst, eval(src), '>');
+            else
+                return calc(dst, src, '>');
         });
 
-        funList.put("cmp", (dst, src) -> {
+        funcList.put("cmp", (dst, src) -> {
             if (src == null) return Result.ERR;
             if (dst == null) return Result.ERR;
-            if (funList.get("mov").run(stateReg, dst) == Result.ERR)
+            if (funcList.get("mov").run(stateReg, dst) == Result.ERR)
                 return Result.ERR;
-            if (funList.get("sub").run(stateReg, src) == Result.ERR)
+            if (src.type == RegType.CODE) {
+                if (funcList.get("sub").run(stateReg, eval(src)) == Result.ERR)
+                    return Result.ERR;
+            } else {
+                if (funcList.get("sub").run(stateReg, src) == Result.ERR)
+                    return Result.ERR;
+			}
+
+            return Result.OK;
+        });
+
+        funcList.put("test", (dst, src) -> {
+            if (src != null) return Result.ERR;
+            if (dst == null) return Result.ERR;
+            if (dst.type == RegType.CODE) {
+                if (funcList.get("mov").run(stateReg, eval(dst)) == Result.ERR)
+                    return Result.ERR;
+            } else {
+                if (funcList.get("mov").run(stateReg, dst) == Result.ERR)
+                    return Result.ERR;
+			}
+
+            Register reg = new Register();
+            reg.type = dst.type; reg.readOnly = false; reg.data = 0;
+            if (funcList.get("sub").run(stateReg, reg) == Result.ERR)
                 return Result.ERR;
             return Result.OK;
         });
 
-        funList.put("jmp", (dst, src) -> {
+        funcList.put("jmp", (dst, src) -> {
             if (src != null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.type != RegType.STR) return Result.ERR;
@@ -756,47 +1045,56 @@ public class NSASM {
             return Result.ERR;
         });
 
-        funList.put("jz", (dst, src) -> {
+        funcList.put("jz", (dst, src) -> {
             if ((float) convValue(stateReg.data, RegType.FLOAT) == 0) {
-                return funList.get("jmp").run(dst, src);
+                return funcList.get("jmp").run(dst, src);
             }
             return Result.OK;
         });
 
-        funList.put("jnz", (dst, src) -> {
+        funcList.put("jnz", (dst, src) -> {
             if ((float) convValue(stateReg.data, RegType.FLOAT) != 0) {
-                return funList.get("jmp").run(dst, src);
+                return funcList.get("jmp").run(dst, src);
             }
             return Result.OK;
         });
 
-        funList.put("jg", (dst, src) -> {
+        funcList.put("jg", (dst, src) -> {
             if ((float) convValue(stateReg.data, RegType.FLOAT) > 0) {
-                return funList.get("jmp").run(dst, src);
+                return funcList.get("jmp").run(dst, src);
             }
             return Result.OK;
         });
 
-        funList.put("jl", (dst, src) -> {
+        funcList.put("jl", (dst, src) -> {
             if ((float) convValue(stateReg.data, RegType.FLOAT) < 0) {
-                return funList.get("jmp").run(dst, src);
+                return funcList.get("jmp").run(dst, src);
             }
             return Result.OK;
         });
 
-        funList.put("end", (dst, src) -> {
-            if (dst == null && src == null)
+        funcList.put("end", (dst, src) -> {
+            if (src == null && dst == null)
                 return Result.ETC;
             return Result.ERR;
         });
 
-        funList.put("nop", (dst, src) -> {
+        funcList.put("ret", (dst, src) -> {
+            if (src == null) {
+                if (dst != null) prevDstReg = dst;
+                else prevDstReg = regGroup[0];
+                return Result.ETC;
+            }
+            return Result.ERR;
+        });
+
+        funcList.put("nop", (dst, src) -> {
             if (dst == null && src == null)
                 return Result.OK;
             return Result.ERR;
         });
 
-        funList.put("rst", (dst, src) -> {
+        funcList.put("rst", (dst, src) -> {
             if (dst == null && src == null) {
                 tmpSeg = 0;
                 tmpCnt = 0;
@@ -805,7 +1103,7 @@ public class NSASM {
             return Result.ERR;
         });
 
-        funList.put("run", (dst, src) -> {
+        funcList.put("run", (dst, src) -> {
             if (src != null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.type != RegType.STR) return Result.ERR;
@@ -822,7 +1120,7 @@ public class NSASM {
             return Result.ERR;
         });
 
-        funList.put("call", (dst, src) -> {
+        funcList.put("call", (dst, src) -> {
             if (src != null) return Result.ERR;
             if (dst == null) return Result.ERR;
             if (dst.type != RegType.STR) return Result.ERR;
@@ -841,11 +1139,20 @@ public class NSASM {
             return Result.OK;
         });
 
-        funList.put("ld", (dst, src) -> {
+        funcList.put("ld", (dst, src) -> {
             if (src != null) return Result.ERR;
             if (dst == null) return Result.ERR;
-            if (dst.type != RegType.STR) return Result.ERR;
-            String path = (String) dst.data;
+            if (dst.type != RegType.STR && dst.type != RegType.CODE)
+                return Result.ERR;
+
+            String path;
+            if (dst.type == RegType.CODE) {
+                Register res = eval(dst);
+                if (res == null) return Result.ERR;
+                if (res.type != RegType.STR) return Result.ERR;
+                path = res.data.toString();
+            } else path = dst.data.toString();
+
             String code = Util.read(path);
             if (code == null) return Result.ERR;
             String[][] segs = Util.getSegments(code);
@@ -853,7 +1160,189 @@ public class NSASM {
                 Util.print("At file: " + path + "\n");
                 return Result.ERR;
             }
+
             return Result.OK;
+        });
+
+        funcList.put("eval", (dst, src) -> {
+            if (dst == null) return Result.ERR;
+
+            if (src == null) eval(dst);
+            else dst.copy(eval(src));
+
+            return Result.OK;
+        });
+
+        funcList.put("use", (dst, src) -> {
+            if (src != null) return Result.ERR;
+            if (dst == null) return Result.ERR;
+            if (dst.readOnly) return Result.ERR;
+            if (dst.type != RegType.MAP) return Result.ERR;
+            useReg = dst;
+            return Result.OK;
+        });
+
+        funcList.put("put", (dst, src) -> {
+            if (src == null) return Result.ERR;
+            if (dst == null) return Result.ERR;
+            if (useReg == null) return Result.ERR;
+            if (useReg.type != RegType.MAP) return Result.ERR;
+            if (dst.type == RegType.CODE) {
+                Register reg = eval(dst);
+                if (reg == null) return Result.ERR;
+                if (!(reg.data instanceof Map)) return Result.ERR;
+                if (((Map)useReg.data).containsKey(reg))
+                    ((Map)useReg.data).remove(reg);
+                ((Map)useReg.data).put(new Register(reg), new Register(src));
+            } else {
+                if (((Map)useReg.data).containsKey(dst))
+                    ((Map)useReg.data).remove(dst);
+                ((Map)useReg.data).put(new Register(dst), new Register(src));
+            }
+
+            return Result.OK;
+        });
+
+        funcList.put("get", (dst, src) -> {
+            if (src == null) return Result.ERR;
+            if (dst == null) return Result.ERR;
+            if (dst.readOnly) return Result.ERR;
+            if (useReg == null) return Result.ERR;
+            if (useReg.type != RegType.MAP) return Result.ERR;
+
+            if (src.type == RegType.CODE) {
+                Register reg = eval(src);
+                if (reg == null) return Result.ERR;
+                if (!(reg.data instanceof Map)) return Result.ERR;
+                if (!((Map)useReg.data).containsKey(reg)) return Result.ERR;
+                return funcList.get("mov").run(dst, ((Map)useReg.data).get(reg));
+            } else {
+                if (!((Map)useReg.data).containsKey(src)) return Result.ERR;
+                return funcList.get("mov").run(dst, ((Map)useReg.data).get(src));
+            }
+        });
+
+        funcList.put("cat", (dst, src) -> {
+            if (src == null) return Result.ERR;
+            if (dst == null) return Result.ERR;
+            if (dst.readOnly) return Result.ERR;
+            switch (dst.type) {
+                case STR:
+                    if (src.type != RegType.STR)
+                        return Result.ERR;
+                    dst.data = (String)dst.data + (String)src.data;
+                    break;
+                case MAP:
+                    if (src.type != RegType.MAP)
+                        return Result.ERR;
+                    if (!(dst.data instanceof Map)) return Result.ERR;
+                    if (!(src.data instanceof Map)) return Result.ERR;
+                for (java.util.Map.Entry<Register, Register> i : ((Map) src.data).entrySet()) {
+                    if (((Map)dst.data).containsKey(i.getKey()))
+                        ((Map)dst.data).remove(i.getKey());
+                    ((Map)dst.data).put(i.getKey(), i.getValue());
+                }
+                break;
+                default:
+                    return Result.ERR;
+            }
+            return Result.OK;
+        });
+
+        funcList.put("dog", (dst, src) -> {
+            if (src == null) return Result.ERR;
+            if (dst == null) return Result.ERR;
+            if (dst.readOnly) return Result.ERR;
+            switch (dst.type) {
+                case STR:
+                    if (src.type != RegType.STR)
+                        return Result.ERR;
+                    dst.data = ((String)dst.data).replace((String)src.data, "");
+                    break;
+                case MAP:
+                    if (src.type != RegType.MAP)
+                        return Result.ERR;
+                    for (java.util.Map.Entry<Register, Register> i : ((Map) src.data).entrySet())
+                    if (((Map)dst.data).containsKey(i.getKey()))
+                        ((Map)dst.data).remove(i.getKey());
+                    break;
+                default:
+                    return Result.ERR;
+            }
+            return Result.OK;
+        });
+
+        funcList.put("type", (dst, src) -> {
+            if (src == null) return Result.ERR;
+            if (dst == null) return Result.ERR;
+            if (dst.readOnly) return Result.ERR;
+
+            Register reg = new Register();
+            reg.type = RegType.STR;
+            reg.readOnly = true;
+            switch (src.type) {
+                case INT: reg.data = "int"; break;
+                case CHAR: reg.data = "char"; break;
+                case FLOAT: reg.data = "float"; break;
+                case STR: reg.data = "str"; break;
+                case CODE: reg.data = "code"; break;
+                case MAP: reg.data = "map"; break;
+            }
+            return funcList.get("mov").run(dst, reg);
+        });
+
+        funcList.put("len", (dst, src) -> {
+            if (dst == null) return Result.ERR;
+            if (dst.readOnly) return Result.ERR;
+            Register reg = new Register();
+            reg.type = RegType.INT;
+            reg.readOnly = true;
+            if (src == null)
+            {
+                if (useReg == null) return Result.ERR;
+                if (useReg.type != RegType.MAP) return Result.ERR;
+                if (!(useReg.data instanceof Map)) return Result.ERR;
+                reg.data = ((Map)useReg.data).size();
+            }
+            else
+            {
+                if (src.type != RegType.STR) return Result.ERR;
+                reg.data = ((String)src.data).length();
+            }
+            return funcList.get("mov").run(dst, reg);
+        });
+
+        funcList.put("ctn", (dst, src) -> {
+            if (dst == null) return Result.ERR;
+            Register reg = new Register();
+            reg.type = RegType.INT;
+            reg.readOnly = true;
+            if (src == null)
+            {
+                if (useReg == null) return Result.ERR;
+                if (useReg.type != RegType.MAP) return Result.ERR;
+                if (!(useReg.data instanceof Map)) return Result.ERR;
+                reg.data = ((Map)useReg.data).containsKey(dst) ? 1 : 0;
+            }
+            else
+            {
+                if (src.type != RegType.STR) return Result.ERR;
+                if (dst.type != RegType.STR) return Result.ERR;
+                reg.data = ((String)dst.data).contains((String)src.data) ? 1 : 0;
+            }
+            return funcList.get("mov").run(stateReg, reg);
+        });
+
+        funcList.put("equ", (dst, src) -> {
+            if (src == null) return Result.ERR;
+            if (dst == null) return Result.ERR;
+            if (src.type != RegType.STR) return Result.ERR;
+            if (dst.type != RegType.STR) return Result.ERR;
+            Register reg = new Register();
+            reg.type = RegType.INT;
+            reg.readOnly = true;
+            reg.data = ((String)dst.data).equals((String)src.data) ? 0 : 1;
+            return funcList.get("mov").run(stateReg, reg);
         });
     }
 

@@ -9,8 +9,8 @@ public class DesktopLauncher {
 	public static void main (String[] arg) {
 		LwjglApplicationConfiguration config = new LwjglApplicationConfiguration();
 		config.title = "NSGDX v0.01 | based on libGDX, NSASM";
-		config.width = 1280;
-		config.height = 720;
+		config.width = 854;
+		config.height = 480;
 		new LwjglApplication(new NyaEgg(), config);
 	}
 }

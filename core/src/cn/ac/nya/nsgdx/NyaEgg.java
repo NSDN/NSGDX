@@ -39,6 +39,8 @@ public class NyaEgg extends NSGDX {
 
     public class Player extends cn.ac.nya.nsgdx.entity.Player {
 
+        public int miss = 0;
+
         public Player(Texture tex) {
             super(tex);
         }
@@ -55,7 +57,10 @@ public class NyaEgg extends NSGDX {
         public boolean doJudge(Vector2 vec) {
             final float len = 4.0F; vec.sub(pos);
             if (Math.abs(vec.x) < len && Math.abs(vec.y) < len) {
-                if (vec.len() < len) return true;
+                if (vec.len() < len) {
+                    miss += 1;
+                    return true;
+                }
             }
             return false;
         }
@@ -161,6 +166,12 @@ public class NyaEgg extends NSGDX {
         renderer.begin();
         renderer.drawString(4, 16, 1, Color.WHITE, "frame: " + counter());
         renderer.drawString(4, devHeight - 4, 1, Color.WHITE, poolCluster.toString());
+
+        if (player != null) {
+            renderer.drawString(devWidth - 96, devHeight - 32, 2, Color.valueOf("FF9800"), "MISS");
+            renderer.drawString(devWidth - 96, devHeight - 64, 2, Color.valueOf("FF9800"), Integer.toString(player.miss));
+        }
+
         renderer.end();
     }
 
@@ -171,9 +182,11 @@ public class NyaEgg extends NSGDX {
         load("arrow");
     }
 
+    Player player;
+
     @Override
     protected void initEntity() {
-        Player player = new Player(get("dot"));
+        player = new Player(get("dot"));
         player.look(Utility.vec2h(devWidth, devHeight));
         player.flash(Utility.vec2h(devWidth, devHeight).scl(1.0F, 0.5F));
         poolCluster.add(player);

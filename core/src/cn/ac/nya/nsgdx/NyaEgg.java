@@ -5,6 +5,7 @@ import cn.ac.nya.nsgdx.utility.Renderer;
 import cn.ac.nya.nsgdx.utility.Utility;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Vector2;
 
@@ -40,17 +41,46 @@ public class NyaEgg extends NSGDX {
     public class Player extends cn.ac.nya.nsgdx.entity.Player {
 
         public int miss = 0;
+        public Vector2 vel;
 
         public Player(Texture tex) {
             super(tex);
+
+            vel = Utility.vec2(0, 0);
         }
 
         @Override
         public Result onUpdate(int t) {
+            Vector2 vec;
+
             if (Gdx.input.isTouched()) {
-                Vector2 vel = Utility.vec2((float) Gdx.input.getDeltaX(), (float) Gdx.input.getDeltaY());
-                move(vel.scl(0.5F).scl(1.0F, -1.0F));
+                vec = Utility.vec2((float) Gdx.input.getDeltaX(), (float) Gdx.input.getDeltaY());
+                vec = vec.scl(0.5F).scl(1.0F, -1.0F);
+            } else {
+                if (Gdx.input.isKeyPressed(Input.Keys.UP))
+                    vel.add(0, 0.1F);
+                else if (vel.y > 0) vel.y = 0;
+                if (Gdx.input.isKeyPressed(Input.Keys.DOWN))
+                    vel.add(0, -0.1F);
+                else if (vel.y < 0) vel.y = 0;
+                if (Gdx.input.isKeyPressed(Input.Keys.LEFT))
+                    vel.add(-0.1F, 0);
+                else if (vel.x < 0) vel.x = 0;
+                if (Gdx.input.isKeyPressed(Input.Keys.RIGHT))
+                    vel.add(0.1F, 0);
+                else if (vel.x > 0) vel.x = 0;
+
+                vec = vel.cpy();
+                if (vec.len() > 0.5F) vec = vec.nor().scl(0.5F);
+
+                if (Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT))
+                    vec = vec.scl(2.0F);
+                else
+                    vec = vec.scl(8.0F);
             }
+
+            move(vec);
+
             return super.onUpdate(t);
         }
 
